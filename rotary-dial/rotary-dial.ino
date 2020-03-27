@@ -7,18 +7,24 @@
 
 #include <Arduino.h>
 #include "TrinketHidCombo.h"
+#include "Signal.h"
 
 // When the dial moves the mouse cursor the wrong way, reverse the values of
 // the PIN_ENCODER constants. 
-#define PIN_ENCODER_A 2
-#define PIN_ENCODER_B 0
+#define PIN_ENCODER_A PIN2
+#define PIN_ENCODER_B PIN0
 #define TRINKET_PINx  PINB
 
-static uint8_t enc_prev_pos = 0;
-static uint8_t enc_flags    = 0;
+static byte enc_prev_pos = 0;
+static byte enc_flags    = 0;
+
+Signal led(PIN1);
 
 void setup()
 {
+  led.blink(500);
+  // led.blink(500);
+
   // set pins as input with internal pull-up resistors enabled
   pinMode(PIN_ENCODER_A, INPUT);
   pinMode(PIN_ENCODER_B, INPUT);
@@ -29,21 +35,21 @@ void setup()
 
   // get an initial reading on the encoder pins
   if (digitalRead(PIN_ENCODER_A) == LOW) {
-    enc_prev_pos |= (1 << 0);
+    enc_prev_pos |= B01;
   }
   if (digitalRead(PIN_ENCODER_B) == LOW) {
-    enc_prev_pos |= (1 << 1);
+    enc_prev_pos |= B10;
   }
 }
 
 void loop()
 {
-  int8_t enc_action = 0; // 1 or -1 if moved, sign is direction
+  byte enc_action = 0; // 1 or -1 if moved, sign is direction
 
   // note: for better performance, the code will now use
   // direct port access techniques
   // http://www.arduino.cc/en/Reference/PortManipulation
-  uint8_t enc_cur_pos = 0;
+  byte enc_cur_pos = 0;
   // read in the encoder state first
   if (bit_is_clear(TRINKET_PINx, PIN_ENCODER_A)) {
     enc_cur_pos |= (1 << 0);
