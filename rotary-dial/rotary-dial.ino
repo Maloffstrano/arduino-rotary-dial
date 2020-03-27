@@ -17,14 +17,14 @@ Signal led(PIN1);
 #define PIN_ENCODER_B PIN0
 #define TRINKET_PINx PINB
 
-static uint8_t enc_prev_pos = 0;
-static uint8_t enc_flags = 0;
+static byte enc_prev_pos = 0;
+static byte enc_flags = 0;
 
 void setup()
 {
   led.blink(500);
   led.blink(500);
-  led.blink(500);
+  //led.blink(500);
   
   // set pins as input with internal pull-up resistors enabled
   pinMode(PIN_ENCODER_A, INPUT);
@@ -47,12 +47,13 @@ void setup()
 
 void loop()
 {
-  int8_t enc_action = 0; // 1 or -1 if moved, sign is direction
+  char enc_action = 0; // 1 or -1 if moved, sign is direction
 
   // note: for better performance, the code will now use
   // direct port access techniques
   // http://www.arduino.cc/en/Reference/PortManipulation
-  uint8_t enc_cur_pos = 0;
+  byte enc_cur_pos = 0;
+  
   // read in the encoder state first
   if (bit_is_clear(TRINKET_PINx, PIN_ENCODER_A))
   {
