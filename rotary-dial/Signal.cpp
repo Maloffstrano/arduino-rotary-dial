@@ -11,23 +11,35 @@
 
 #include "Signal.h"
 
-Signal::Signal(byte pinNumber) {
+Signal::Signal(byte pinNumber)
+{
   pin = pinNumber;
   pinMode(pin, OUTPUT);
   off();
 }
 
-void Signal::on() {
+void Signal::on()
+{
   digitalWrite(pin, HIGH);
 }
 
-void Signal::off() {
+void Signal::off()
+{
   digitalWrite(pin, LOW);
 }
 
-void Signal::blink(int delay_ms) {
+void Signal::blink(int delay_ms)
+{
   on();
   delay(delay_ms);
   off();
   delay(delay_ms);
+}
+
+void Signal::blink(int delay_ms, int count)
+{
+  while (count--)
+  {
+    blink(delay_ms);
+  }
 }

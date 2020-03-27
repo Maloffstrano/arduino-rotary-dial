@@ -20,6 +20,7 @@ class Signal {
     void on();
     void off();
     void blink(int delay_ms);
+    void blink(int delay_ms, int count);
 
   private:
     byte pin;
