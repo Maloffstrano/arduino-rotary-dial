@@ -24,7 +24,7 @@ void setup()
 {
   led.blink(500);
   led.blink(500);
-  //led.blink(500);
+  led.blink(500);
   
   // set pins as input with internal pull-up resistors enabled
   pinMode(PIN_ENCODER_A, INPUT);
@@ -37,11 +37,11 @@ void setup()
   // get an initial reading on the encoder pins
   if (digitalRead(PIN_ENCODER_A) == LOW)
   {
-    enc_prev_pos |= (1 << 0);
+    enc_prev_pos |= _BV(0);
   }
   if (digitalRead(PIN_ENCODER_B) == LOW)
   {
-    enc_prev_pos |= (1 << 1);
+    enc_prev_pos |= _BV(1);
   }
 }
 
@@ -57,11 +57,11 @@ void loop()
   // read in the encoder state first
   if (bit_is_clear(TRINKET_PINx, PIN_ENCODER_A))
   {
-    enc_cur_pos |= (1 << 0);
+    enc_cur_pos |= _BV(0);
   }
   if (bit_is_clear(TRINKET_PINx, PIN_ENCODER_B))
   {
-    enc_cur_pos |= (1 << 1);
+    enc_cur_pos |= _BV(1);
   }
 
   // if any rotation at all
@@ -72,29 +72,29 @@ void loop()
       // this is the first edge
       if (enc_cur_pos == 0x01)
       {
-        enc_flags |= (1 << 0);
+        enc_flags |= _BV(0);
       }
       else if (enc_cur_pos == 0x02)
       {
-        enc_flags |= (1 << 1);
+        enc_flags |= _BV(1);
       }
     }
 
     if (enc_cur_pos == 0x03)
     {
       // this is when the encoder is in the middle of a "step"
-      enc_flags |= (1 << 4);
+      enc_flags |= _BV(4);
     }
     else if (enc_cur_pos == 0x00)
     {
       // this is the final edge
       if (enc_prev_pos == 0x02)
       {
-        enc_flags |= (1 << 2);
+        enc_flags |= _BV(2);
       }
       else if (enc_prev_pos == 0x01)
       {
-        enc_flags |= (1 << 3);
+        enc_flags |= _BV(3);
       }
 
       // check the first and last edge
