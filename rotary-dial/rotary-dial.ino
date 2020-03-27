@@ -2,7 +2,6 @@
 
 #include <Arduino.h>
 #include "TrinketHidCombo.h"
-#include "Signal.h"
 
 // When the dial moves the mouse cursor the wrong way, reverse the values of
 // the PIN_ENCODER constants.
@@ -15,12 +14,10 @@
 
 // You may comment out the following line if you do not want the rotary
 // encoder switch enabled (or if you don't have a switch).
-//#define SWITCH_ENABLED
+#define SWITCH_ENABLED
 
 static byte lastEncoderA;
 static boolean switchIsPressed = false;
-
-// Signal led(PIN3);
 
 void setup()
 {
