@@ -8,43 +8,23 @@
 // the PIN_ENCODER constants.
 #define PIN_ENCODER_A PIN2
 #define PIN_ENCODER_B PIN0
-#define PIN_ENCODER_SWITCH PIN1
-
-#define SWITCH_PRESSED LOW
-#define SWITCH_DEBOUNCE_DELAY 5
-
-// You may comment out the following line if you do not want the rotary
-// encoder switch enabled (or if you don't have a switch).
-//#define SWITCH_ENABLED
 
 static byte lastEncoderA;
-static boolean switchIsPressed = false;
 
-// Signal led(PIN3);
+Signal led(PIN1);
 
 void setup()
 {
   // Signal on the built-in led that code is about to run. I change the counter
   // on each compile to ensure that I'm running current code. Sometimes the
   // Digispark fails to program and I miss the error message in the output.
-  // led.blink(500, 3);
+  led.blink(500, 3);
   
   // Set pins as input with internal pull-up resistors enabled.
   pinMode(PIN_ENCODER_A, INPUT);
   pinMode(PIN_ENCODER_B, INPUT);
   digitalWrite(PIN_ENCODER_A, HIGH);
   digitalWrite(PIN_ENCODER_B, HIGH);
-
-#ifdef SWITCH_ENABLED
-  // Set the switch as input with internal pull-up resistor enabled.
-  // Note: On the Tiny85, the LED interferes with the very weak 25Kohm
-  // pull-up resistors. There is a tiny white-box above P3 between the pin 5
-  // of the integrated circuit and the LED. You need to carefully cut the 
-  // copper trace under the white box to disable the LED and enable proper
-  // digital read of the switch.
-  pinMode(PIN_ENCODER_SWITCH, INPUT);
-  digitalWrite(PIN_ENCODER_SWITCH, HIGH);
-#endif
 
   // Start the USB.
   TrinketHidCombo.begin();
@@ -88,29 +68,11 @@ void loop()
       TrinketHidCombo.pressMultimediaKey(MMKEY_VOL_DOWN);
     }
   }
-  lastEncoderA = currentEncoderA;
-
-#ifdef SWITCH_ENABLED
-  if (digitalRead(PIN_ENCODER_SWITCH) == SWITCH_PRESSED)
-  {
-    // Send event only on transition, not while button is held down.
-    if (switchIsPressed == false)
-    {
-      TrinketHidCombo.pressMultimediaKey(MMKEY_MUTE);
-      delay(SWITCH_DEBOUNCE_DELAY);
-    }
-    switchIsPressed = true;
-  }
   else
   {
-    if (switchIsPressed)
-    {
-      delay(SWITCH_DEBOUNCE_DELAY);
-    }
-    switchIsPressed = false;
+    // USB maintenance call
+    TrinketHidCombo.poll();
   }
-#endif
 
-  // USB maintenance call
-  TrinketHidCombo.poll();
+  lastEncoderA = currentEncoderA;
 }
