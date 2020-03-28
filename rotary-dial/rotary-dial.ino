@@ -1,116 +1,138 @@
+// #include <cmdline_defs.h>
+// #include <TrinketHidCombo.h>
+// #include <TrinketHidComboC.h>
+// #include <usbconfig.h>
+
 // see tutorial at http://learn.adafruit.com/trinket-usb-volume-knob
 
 #include <Arduino.h>
 #include "TrinketHidCombo.h"
 #include "Signal.h"
 
+Signal led(PIN1);
+
 // When the dial moves the mouse cursor the wrong way, reverse the values of
 // the PIN_ENCODER constants.
 #define PIN_ENCODER_A PIN2
 #define PIN_ENCODER_B PIN0
-#define PIN_ENCODER_SWITCH PIN1
+#define TRINKET_PINx PINB
 
-#define SWITCH_PRESSED LOW
-#define SWITCH_DEBOUNCE_DELAY 5
-
-// You may comment out the following line if you do not want the rotary
-// encoder switch enabled (or if you don't have a switch).
-//#define SWITCH_ENABLED
-
-static byte lastEncoderA;
-static boolean switchIsPressed = false;
-
-// Signal led(PIN3);
+static byte enc_prev_pos = 0;
+static byte enc_flags = 0;
 
 void setup()
 {
-  // Signal on the built-in led that code is about to run. I change the counter
-  // on each compile to ensure that I'm running current code. Sometimes the
-  // Digispark fails to program and I miss the error message in the output.
-  // led.blink(500, 3);
+  led.blink(500);
+  led.blink(500);
+  led.blink(500);
   
-  // Set pins as input with internal pull-up resistors enabled.
+  // set pins as input with internal pull-up resistors enabled
   pinMode(PIN_ENCODER_A, INPUT);
   pinMode(PIN_ENCODER_B, INPUT);
   digitalWrite(PIN_ENCODER_A, HIGH);
   digitalWrite(PIN_ENCODER_B, HIGH);
 
-#ifdef SWITCH_ENABLED
-  // Set the switch as input with internal pull-up resistor enabled.
-  // Note: On the Tiny85, the LED interferes with the very weak 25Kohm
-  // pull-up resistors. There is a tiny white-box above P3 between the pin 5
-  // of the integrated circuit and the LED. You need to carefully cut the 
-  // copper trace under the white box to disable the LED and enable proper
-  // digital read of the switch.
-  pinMode(PIN_ENCODER_SWITCH, INPUT);
-  digitalWrite(PIN_ENCODER_SWITCH, HIGH);
-#endif
+  TrinketHidCombo.begin(); // start the USB device engine and enumerate
 
-  // Start the USB.
-  TrinketHidCombo.begin();
-
-  //Capture current encoder state.
-  lastEncoderA = digitalRead(PIN_ENCODER_A);
+  // get an initial reading on the encoder pins
+  if (digitalRead(PIN_ENCODER_A) == LOW)
+  {
+    enc_prev_pos |= _BV(0);
+  }
+  if (digitalRead(PIN_ENCODER_B) == LOW)
+  {
+    enc_prev_pos |= _BV(1);
+  }
 }
 
 void loop()
 {
-  // How a rotary encoder works:
-  //
-  // Clockwise                  Counter-clockwise
-  //      __    __    __        __    __    __
-  // A __|  |__|  |__|  |__       |__|  |__|  |__
-  //         0  1  0  1            0  1  0  1
-  //
-  //        __    __    __           __    __
-  // B ____|  |__|  |__|  |__   ____|  |__|  |__
-  //         1  0  1  0            0  1  0  1
-  //
-  // Output A and B are 90-degrees out of phase. When the values differ,
-  // the direction is clockwise. When the values are the same, direction
-  // is counter-clockwise. Only check output B when output A changes state.
-  //
-  // See: https://howtomechatronics.com/tutorials/arduino/rotary-encoder-works-use-arduino/
+  char enc_action = 0; // 1 or -1 if moved, sign is direction
 
-  byte currentEncoderA = digitalRead(PIN_ENCODER_A);
-
-  if (currentEncoderA != lastEncoderA)
+  // note: for better performance, the code will now use
+  // direct port access techniques
+  // http://www.arduino.cc/en/Reference/PortManipulation
+  byte enc_cur_pos = 0;
+  
+  // read in the encoder state first
+  if (bit_is_clear(TRINKET_PINx, PIN_ENCODER_A))
   {
-    // Output A has changed state.
-    if (digitalRead(PIN_ENCODER_B) != currentEncoderA)
+    enc_cur_pos |= _BV(0);
+  }
+  if (bit_is_clear(TRINKET_PINx, PIN_ENCODER_B))
+  {
+    enc_cur_pos |= _BV(1);
+  }
+
+  // if any rotation at all
+  if (enc_cur_pos != enc_prev_pos)
+  {
+    if (enc_prev_pos == 0x00)
     {
-      // Clockwise - output A differs from output B
-      TrinketHidCombo.pressMultimediaKey(MMKEY_VOL_UP);
+      // this is the first edge
+      if (enc_cur_pos == 0x01)
+      {
+        enc_flags |= _BV(0);
+      }
+      else if (enc_cur_pos == 0x02)
+      {
+        enc_flags |= _BV(1);
+      }
     }
-    else
+
+    if (enc_cur_pos == 0x03)
     {
-      // Counter-clockwise - output A is same as B
-      TrinketHidCombo.pressMultimediaKey(MMKEY_VOL_DOWN);
+      // this is when the encoder is in the middle of a "step"
+      enc_flags |= _BV(4);
+    }
+    else if (enc_cur_pos == 0x00)
+    {
+      // this is the final edge
+      if (enc_prev_pos == 0x02)
+      {
+        enc_flags |= _BV(2);
+      }
+      else if (enc_prev_pos == 0x01)
+      {
+        enc_flags |= _BV(3);
+      }
+
+      // check the first and last edge
+      // or maybe one edge is missing, if missing then require the middle state
+      // this will reject bounces and false movements
+      if (bit_is_set(enc_flags, 0) && (bit_is_set(enc_flags, 2) || bit_is_set(enc_flags, 4)))
+      {
+        enc_action = 1;
+      }
+      else if (bit_is_set(enc_flags, 2) && (bit_is_set(enc_flags, 0) || bit_is_set(enc_flags, 4)))
+      {
+        enc_action = 1;
+      }
+      else if (bit_is_set(enc_flags, 1) && (bit_is_set(enc_flags, 3) || bit_is_set(enc_flags, 4)))
+      {
+        enc_action = -1;
+      }
+      else if (bit_is_set(enc_flags, 3) && (bit_is_set(enc_flags, 1) || bit_is_set(enc_flags, 4)))
+      {
+        enc_action = -1;
+      }
+
+      enc_flags = 0; // reset for next time
     }
   }
-  lastEncoderA = currentEncoderA;
 
-#ifdef SWITCH_ENABLED
-  if (digitalRead(PIN_ENCODER_SWITCH) == SWITCH_PRESSED)
+  enc_prev_pos = enc_cur_pos;
+
+  if (enc_action > 0)
   {
-    // Send event only on transition, not while button is held down.
-    if (switchIsPressed == false)
-    {
-      TrinketHidCombo.pressMultimediaKey(MMKEY_MUTE);
-      delay(SWITCH_DEBOUNCE_DELAY);
-    }
-    switchIsPressed = true;
+    TrinketHidCombo.pressMultimediaKey(MMKEY_VOL_UP);
+  }
+  else if (enc_action < 0)
+  {
+    TrinketHidCombo.pressMultimediaKey(MMKEY_VOL_DOWN);
   }
   else
   {
-    if (switchIsPressed)
-    {
-      delay(SWITCH_DEBOUNCE_DELAY);
-    }
-    switchIsPressed = false;
+    TrinketHidCombo.poll(); // do nothing, check if USB needs anything done
   }
-#endif
-
-  // USB maintenance call
-  TrinketHidCombo.poll();
 }
