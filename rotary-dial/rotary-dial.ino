@@ -1,31 +1,38 @@
-// #include <cmdline_defs.h>
-// #include <TrinketHidCombo.h>
-// #include <TrinketHidComboC.h>
-// #include <usbconfig.h>
-
 // see tutorial at http://learn.adafruit.com/trinket-usb-volume-knob
 
 #include <Arduino.h>
 #include "TrinketHidCombo.h"
-#include "Signal.h"
-
-Signal led(PIN1);
 
 // When the dial moves the mouse cursor the wrong way, reverse the values of
 // the PIN_ENCODER constants.
 #define PIN_ENCODER_A PIN2
 #define PIN_ENCODER_B PIN0
-#define TRINKET_PINx PINB
 
-static byte enc_prev_pos = 0;
-static byte enc_flags = 0;
+signed char const encoderRotationNone = 0;
+signed char const encoderRotationRight = 1;
+signed char const encoderRotationLeft = -1;
+
+const byte encoderLowA = _BV(0);
+const byte encoderLowB = _BV(1);
+const byte encoderBothHigh = 0;
+const byte encoderBothLow = encoderLowA | encoderLowB;
+const byte encoderHighBLowA = encoderLowA;
+const byte encoderLowBHighA = encoderLowB;
+
+//                             bit number 43210
+const byte encoderFlagResetForNextLoop = B00000;
+const byte encoderFlagHighToLowEdgeA   = B00001;
+const byte encoderFlagHighToLowEdgeB   = B00010;
+const byte encoderFlagMidStep          = B10000;
+const byte encoderFlagLowToHighEdgeA   = B01000;
+const byte encoderFlagLowToHighEdgeB   = B00100;
+//                             bit number 43210
+
+static byte encoderFlags = encoderFlagResetForNextLoop;
+static byte encoderPositionPrevious = encoderBothHigh;
 
 void setup()
 {
-  led.blink(500);
-  led.blink(500);
-  led.blink(500);
-  
   // set pins as input with internal pull-up resistors enabled
   pinMode(PIN_ENCODER_A, INPUT);
   pinMode(PIN_ENCODER_B, INPUT);
@@ -37,102 +44,114 @@ void setup()
   // get an initial reading on the encoder pins
   if (digitalRead(PIN_ENCODER_A) == LOW)
   {
-    enc_prev_pos |= _BV(0);
+    encoderPositionPrevious |= encoderLowA;
   }
   if (digitalRead(PIN_ENCODER_B) == LOW)
   {
-    enc_prev_pos |= _BV(1);
+    encoderPositionPrevious |= encoderLowB;
   }
 }
 
 void loop()
 {
-  char enc_action = 0; // 1 or -1 if moved, sign is direction
+  signed char encoderRotation = encoderRotationNone;
 
-  // note: for better performance, the code will now use
-  // direct port access techniques
-  // http://www.arduino.cc/en/Reference/PortManipulation
-  byte enc_cur_pos = 0;
-  
-  // read in the encoder state first
-  if (bit_is_clear(TRINKET_PINx, PIN_ENCODER_A))
+  byte encoderPositionCurrent = 0 /*encoderBothHigh*/;
+
+  // How a rotary encoder works:
+  //
+  // Clockwise                        Counter-clockwise
+  //   ___      ____      ____            ____      ____      __
+  // A    |____|    |____|    |____   ___|    |____|    |____|
+  //       0    1    0    1               0    1    0    1
+  //
+  //     ____      ____      ____     _      ____      ____
+  // B _|    |____|    |____|    |_    |____|    |____|    |____
+  //       1    0    1    0               0    1    0    1
+  //
+  // Output A and B are 90-degrees out of phase. When the values differ,
+  // the direction is clockwise. When the values are the same, direction
+  // is counter-clockwise.
+  //
+  // See: https://howtomechatronics.com/tutorials/arduino/rotary-encoder-works-use-arduino/
+
+  byte encoderCurrentPosition = encoderBothHigh;
+
+  if (digitalRead(PIN_ENCODER_A) == LOW)
   {
-    enc_cur_pos |= _BV(0);
+    encoderCurrentPosition |= encoderLowA;
   }
-  if (bit_is_clear(TRINKET_PINx, PIN_ENCODER_B))
+  if (digitalRead(PIN_ENCODER_B) == LOW)
   {
-    enc_cur_pos |= _BV(1);
+    encoderCurrentPosition |= encoderLowB;
   }
 
-  // if any rotation at all
-  if (enc_cur_pos != enc_prev_pos)
+  // Has encoder rotated?
+  if (encoderPositionCurrent != encoderPositionPrevious)
   {
-    if (enc_prev_pos == 0x00)
+    if (encoderPositionPrevious == encoderBothHigh)
     {
-      // this is the first edge
-      if (enc_cur_pos == 0x01)
+      // Has encoder transitioned high to low; the leading edge?
+      if (encoderPositionCurrent == encoderHighBLowA)
       {
-        enc_flags |= _BV(0);
+        encoderFlags |= encoderFlagHighToLowEdgeA;
       }
-      else if (enc_cur_pos == 0x02)
+      else if (encoderPositionCurrent == encoderLowBHighA)
       {
-        enc_flags |= _BV(1);
+        encoderFlags |= encoderFlagHighToLowEdgeB;
       }
     }
 
-    if (enc_cur_pos == 0x03)
+    if (encoderCurrentPosition == encoderBothLow)
     {
-      // this is when the encoder is in the middle of a "step"
-      enc_flags |= _BV(4);
+      encoderFlags |= encoderFlagMidStep;
     }
-    else if (enc_cur_pos == 0x00)
+    else if (encoderCurrentPosition == encoderBothHigh)
     {
-      // this is the final edge
-      if (enc_prev_pos == 0x02)
+      // Has encoder transitioned low to high; the trailing edge?
+      if (encoderPositionPrevious == encoderLowB)
       {
-        enc_flags |= _BV(2);
+        encoderFlags |= encoderFlagLowToHighEdgeB;
       }
-      else if (enc_prev_pos == 0x01)
+      else if (encoderPositionPrevious == encoderLowA)
       {
-        enc_flags |= _BV(3);
-      }
-
-      // check the first and last edge
-      // or maybe one edge is missing, if missing then require the middle state
-      // this will reject bounces and false movements
-      if (bit_is_set(enc_flags, 0) && (bit_is_set(enc_flags, 2) || bit_is_set(enc_flags, 4)))
-      {
-        enc_action = 1;
-      }
-      else if (bit_is_set(enc_flags, 2) && (bit_is_set(enc_flags, 0) || bit_is_set(enc_flags, 4)))
-      {
-        enc_action = 1;
-      }
-      else if (bit_is_set(enc_flags, 1) && (bit_is_set(enc_flags, 3) || bit_is_set(enc_flags, 4)))
-      {
-        enc_action = -1;
-      }
-      else if (bit_is_set(enc_flags, 3) && (bit_is_set(enc_flags, 1) || bit_is_set(enc_flags, 4)))
-      {
-        enc_action = -1;
+        encoderFlags |= encoderFlagLowToHighEdgeA;
       }
 
-      enc_flags = 0; // reset for next time
+      // Check leading an trailing edge, or when an edge is missing, require the
+      // middle step. This will reject bounces and false movements.
+      if ((encoderFlags & encoderFlagHighToLowEdgeA) && (encoderFlags & (encoderFlagLowToHighEdgeB | encoderFlagMidStep)))
+      {
+        encoderRotation = encoderRotationRight;
+      }
+      else if ((encoderFlags & encoderFlagLowToHighEdgeB) && (encoderFlags & (encoderFlagHighToLowEdgeA | encoderFlagMidStep)))
+      {
+        encoderRotation = encoderRotationRight;
+      }
+      else if ((encoderFlags & encoderFlagHighToLowEdgeB) && (encoderFlags & (encoderFlagLowToHighEdgeA | encoderFlagMidStep)))
+      {
+        encoderRotation = encoderRotationLeft;
+      }
+      else if ((encoderFlags & encoderFlagLowToHighEdgeA) && (encoderFlags & (encoderFlagHighToLowEdgeB | encoderFlagMidStep)))
+      {
+        encoderRotation = encoderRotationLeft;
+      }
+
+      encoderFlags = encoderFlagResetForNextLoop;
     }
   }
 
-  enc_prev_pos = enc_cur_pos;
+  encoderPositionPrevious = encoderCurrentPosition;
 
-  if (enc_action > 0)
-  {
+  switch (encoderRotation) {
+  case encoderRotationRight:
     TrinketHidCombo.pressMultimediaKey(MMKEY_VOL_UP);
-  }
-  else if (enc_action < 0)
-  {
+    break;
+  case encoderRotationLeft:
     TrinketHidCombo.pressMultimediaKey(MMKEY_VOL_DOWN);
-  }
-  else
-  {
-    TrinketHidCombo.poll(); // do nothing, check if USB needs anything done
+    break;
+  default:
+    TrinketHidCombo.poll();
+    break;
   }
 }
