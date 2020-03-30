@@ -1,12 +1,24 @@
 // see tutorial at http://learn.adafruit.com/trinket-usb-volume-knob
 
 #include <Arduino.h>
-#include "TrinketHidCombo.h"
+#include "TrinketKeyboard.h"
 
 // When the dial moves the mouse cursor the wrong way, reverse the values of
 // the PIN_ENCODER constants.
 #define PIN_ENCODER_A PIN2
 #define PIN_ENCODER_B PIN0
+#define PIN_ENCODER_SWITCH PIN1
+
+#define SWITCH_PRESSED LOW
+#define SWITCH_DEBOUNCE_DELAY 5
+
+// You may comment out the following line if you do not want the rotary
+// encoder switch enabled (or if you don't have a switch).
+#define SWITCH_ENABLED
+
+#ifdef SWITCH_ENABLED
+static boolean switchIsPressed = false;
+#endif
 
 signed char const encoderRotationNone = 0;
 signed char const encoderRotationRight = 1;
@@ -31,6 +43,12 @@ const byte encoderFlagLowToHighEdgeB   = B00100;
 static byte encoderFlags = encoderFlagResetForNextLoop;
 static byte encoderPositionPrevious = encoderBothHigh;
 
+static unsigned long startTime = 0;
+const unsigned long countTime = 5;
+
+static signed char mouseMove = 0;
+static signed char lastMouseMove = 0;
+
 void setup()
 {
   // set pins as input with internal pull-up resistors enabled
@@ -39,7 +57,7 @@ void setup()
   digitalWrite(PIN_ENCODER_A, HIGH);
   digitalWrite(PIN_ENCODER_B, HIGH);
 
-  TrinketHidCombo.begin(); // start the USB device engine and enumerate
+  TrinketKeyboard.begin(); // start the USB device engine and enumerate
 
   // get an initial reading on the encoder pins
   if (digitalRead(PIN_ENCODER_A) == LOW)
@@ -50,6 +68,24 @@ void setup()
   {
     encoderPositionPrevious |= encoderLowB;
   }
+
+  byte foo = DDRB;
+
+  // TODO
+  // startTime = millis();
+
+#ifdef SWITCH_ENABLED
+  // Set the switch as input with internal pull-up resistor enabled.
+  // Note: On the Tiny85, the LED interferes with the very weak 25Kohm
+  // pull-up resistors. There is a tiny white-box above P3 between the pin 5
+  // of the integrated circuit and the LED. You need to carefully cut the
+  // copper trace under the white box to disable the LED and enable proper
+  // digital read of the switch.
+  //
+  // See: https://digistump.com/wiki/digispark/tutorials/basics
+  pinMode(PIN_ENCODER_SWITCH, INPUT);
+  digitalWrite(PIN_ENCODER_SWITCH, HIGH);
+#endif
 }
 
 void loop()
@@ -60,20 +96,36 @@ void loop()
 
   // How a rotary encoder works:
   //
-  // Clockwise                        Counter-clockwise
-  //   ___      ____      ____            ____      ____      __
-  // A    |____|    |____|    |____   ___|    |____|    |____|
-  //       0    1    0    1               0    1    0    1
+  // Clockwise                      Counter-clockwise
+  //          ____        ____        ____        ____
+  // A ______|    |______|    |   ___|    |______|    |___
+  //    0  0  1  1  0  0  1  1     0  1  1  0  0  1  1  0
+  //    |  |  |  |  |  |  |  |     |  |  |  |  |  |  |  |
+  //    |  |  |  |  |  |  |  |     |  |  |  |  |  |  |  |
+  //    1  2  3  4  1  2  3  4     1  2  3  4  1  2  3  4
+  //    |  |  |  |  |  |  |  |     |  |  |  |  |  |  |  |
+  //    |  |  |  |  |  |  |  |     |  |  |  |  |  |  |  |
+  //       ____        ____              ____        ____
+  // B ___|    |______|    |___   ______|    |______|    |
+  //    0  1  1  0  0  1  1  0     0  0  1  1  0  0  1  1
+  //          *           *              *           *
   //
-  //     ____      ____      ____     _      ____      ____
-  // B _|    |____|    |____|    |_    |____|    |____|    |____
-  //       1    0    1    0               0    1    0    1
+  // Each segment 1, 2, 3, 4 is 90-degrees. All four is 360-degrees.
+  //
+  // Written together, the signals from A and B look like this:
+  //
+  // A  0  0  1  1  0  0  1  1     0  1  1  0  0  1  1  0
+  // B  0  1  1  0  0  1  1  0     0  0  1  1  0  0  1  1
+  //          *           *              *           *
   //
   // Output A and B are 90-degrees out of phase. When the values differ,
   // the direction is clockwise. When the values are the same, direction
   // is counter-clockwise.
   //
+  // The * indicates the state that the code refers to as: encoderFlagMidStep
+  //
   // See: https://howtomechatronics.com/tutorials/arduino/rotary-encoder-works-use-arduino/
+  // See: wikipedia article PLACE THAT FIRST!
 
   byte encoderCurrentPosition = encoderBothHigh;
 
@@ -118,7 +170,7 @@ void loop()
         encoderFlags |= encoderFlagLowToHighEdgeA;
       }
 
-      // Check leading an trailing edge, or when an edge is missing, require the
+      // Check leading and trailing edge, or when an edge is missing, require the
       // middle step. This will reject bounces and false movements.
       if ((encoderFlags & encoderFlagHighToLowEdgeA) && (encoderFlags & (encoderFlagLowToHighEdgeB | encoderFlagMidStep)))
       {
@@ -143,15 +195,49 @@ void loop()
 
   encoderPositionPrevious = encoderCurrentPosition;
 
-  switch (encoderRotation) {
-  case encoderRotationRight:
-    TrinketHidCombo.pressMultimediaKey(MMKEY_VOL_UP);
-    break;
-  case encoderRotationLeft:
-    TrinketHidCombo.pressMultimediaKey(MMKEY_VOL_DOWN);
-    break;
-  default:
-    TrinketHidCombo.poll();
-    break;
+  // unsigned long currentTime = millis();
+  // if (currentTime - startTime < 5) {
+  //   mouseMove += encoderRotation;
+  // } else {
+  //   lastMouseMove = mouseMove + encoderRotation;
+  //   mouseMove = 0;
+  // }
+  // TrinketKeyboard.move(lastMouseMove, 0, 0, 0);
+
+#ifdef SWITCH_ENABLED
+  if (digitalRead(PIN_ENCODER_SWITCH) == SWITCH_PRESSED)
+  {
+    // Send event only on transition, not while button is held down.
+    if (switchIsPressed == false)
+    {
+      TrinketKeyboard.pressKey(0, KEYCODE_F);
+      TrinketKeyboard.pressKey(0, 0);
+      delay(SWITCH_DEBOUNCE_DELAY);
+    }
+    switchIsPressed = true;
+  }
+  else
+  {
+    if (switchIsPressed)
+    {
+      delay(SWITCH_DEBOUNCE_DELAY);
+    }
+    switchIsPressed = false;
+  }
+#endif
+
+  switch (encoderRotation)
+  {    
+    case encoderRotationRight:
+      TrinketKeyboard.pressKey(0, KEYCODE_R);
+      TrinketKeyboard.pressKey(0, 0);
+      break;
+    case encoderRotationLeft:
+      TrinketKeyboard.pressKey(0, KEYCODE_L);
+      TrinketKeyboard.pressKey(0, 0);
+      break;
+    default:
+      TrinketKeyboard.poll();
+      break;
   }
 }
