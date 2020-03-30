@@ -43,12 +43,6 @@ const byte encoderFlagLowToHighEdgeB   = B00100;
 static byte encoderFlags = encoderFlagResetForNextLoop;
 static byte encoderPositionPrevious = encoderBothHigh;
 
-static unsigned long startTime = 0;
-const unsigned long countTime = 5;
-
-static signed char mouseMove = 0;
-static signed char lastMouseMove = 0;
-
 void setup()
 {
   // set pins as input with internal pull-up resistors enabled
@@ -68,11 +62,6 @@ void setup()
   {
     encoderPositionPrevious |= encoderLowB;
   }
-
-  byte foo = DDRB;
-
-  // TODO
-  // startTime = millis();
 
 #ifdef SWITCH_ENABLED
   // Set the switch as input with internal pull-up resistor enabled.
@@ -194,15 +183,6 @@ void loop()
   }
 
   encoderPositionPrevious = encoderCurrentPosition;
-
-  // unsigned long currentTime = millis();
-  // if (currentTime - startTime < 5) {
-  //   mouseMove += encoderRotation;
-  // } else {
-  //   lastMouseMove = mouseMove + encoderRotation;
-  //   mouseMove = 0;
-  // }
-  // TrinketKeyboard.move(lastMouseMove, 0, 0, 0);
 
 #ifdef SWITCH_ENABLED
   if (digitalRead(PIN_ENCODER_SWITCH) == SWITCH_PRESSED)
