@@ -1,16 +1,10 @@
-// see tutorial at http://learn.adafruit.com/trinket-usb-volume-knob
+// This code is based off the tutorial at:
+// http://learn.adafruit.com/trinket-usb-volume-knob
+// It has been modified to use named constants in place of all the cryptic,
+// hard-coded, bit positions.
 
 #include <Arduino.h>
 #include "TrinketKeyboard.h"
-
-// When the dial moves the mouse cursor the wrong way, reverse the values of
-// the PIN_ENCODER constants.
-#define PIN_ENCODER_A PIN2
-#define PIN_ENCODER_B PIN0
-#define PIN_ENCODER_SWITCH PIN1
-
-#define SWITCH_PRESSED LOW
-#define SWITCH_DEBOUNCE_DELAY 5
 
 // You may comment out the following line if you do not want the rotary
 // encoder switch enabled (or if you don't have a switch).
@@ -19,6 +13,28 @@
 #ifdef SWITCH_ENABLED
 static boolean switchIsPressed = false;
 #endif
+
+// Keycodes sent in response to left and right rotational motion and switch.
+// Choose whatever characters you want to send. No other code modifications
+// are required. I chose (L)eft, (R)ight and (F)ire.
+const int keycodeRotateLeft  = KEYCODE_L;
+const int keycodeRotateRight = KEYCODE_R;
+const int keycodeSwitch      = KEYCODE_F;
+const int keycodeRelease     = 0;
+const int keycodeNoModifiers = 0;
+
+const byte pinEncoderA = PIN2;
+const byte pinEncoderB = PIN0;
+const byte pinEncoderSwitch = PIN1;
+
+const byte portReadPinMaskA = _BV(pinEncoderA);
+const byte portReadPinMaskB = _BV(pinEncoderB);
+const byte portReadSwitchMask = _BV(pinEncoderSwitch);
+const byte portReadPinMaskBShift = 1;
+const byte portReadPinMask = portReadPinMaskA | portReadPinMaskB | portReadSwitchMask;
+
+const int encoderSwitchDebounceDelay = 5;
+const byte encoderSwitchPressed = LOW;
 
 signed char const encoderRotationNone = 0;
 signed char const encoderRotationRight = 1;
@@ -31,34 +47,32 @@ const byte encoderBothLow = encoderLowA | encoderLowB;
 const byte encoderHighBLowA = encoderLowA;
 const byte encoderLowBHighA = encoderLowB;
 
-//                             bit number 43210
 const byte encoderFlagResetForNextLoop = B00000;
 const byte encoderFlagHighToLowEdgeA   = B00001;
 const byte encoderFlagHighToLowEdgeB   = B00010;
 const byte encoderFlagMidStep          = B10000;
 const byte encoderFlagLowToHighEdgeA   = B01000;
 const byte encoderFlagLowToHighEdgeB   = B00100;
-//                             bit number 43210
 
 static byte encoderFlags = encoderFlagResetForNextLoop;
 static byte encoderPositionPrevious = encoderBothHigh;
 
 void setup()
 {
-  // set pins as input with internal pull-up resistors enabled
-  pinMode(PIN_ENCODER_A, INPUT);
-  pinMode(PIN_ENCODER_B, INPUT);
-  digitalWrite(PIN_ENCODER_A, HIGH);
-  digitalWrite(PIN_ENCODER_B, HIGH);
+  // Set pins as input with internal pull-up resistors enabled
+  pinMode(pinEncoderA, INPUT);
+  pinMode(pinEncoderB, INPUT);
+  digitalWrite(pinEncoderA, HIGH);
+  digitalWrite(pinEncoderB, HIGH);
 
   TrinketKeyboard.begin(); // start the USB device engine and enumerate
 
   // get an initial reading on the encoder pins
-  if (digitalRead(PIN_ENCODER_A) == LOW)
+  if (digitalRead(pinEncoderA) == LOW)
   {
     encoderPositionPrevious |= encoderLowA;
   }
-  if (digitalRead(PIN_ENCODER_B) == LOW)
+  if (digitalRead(pinEncoderB) == LOW)
   {
     encoderPositionPrevious |= encoderLowB;
   }
@@ -72,20 +86,19 @@ void setup()
   // digital read of the switch.
   //
   // See: https://digistump.com/wiki/digispark/tutorials/basics
-  pinMode(PIN_ENCODER_SWITCH, INPUT);
-  digitalWrite(PIN_ENCODER_SWITCH, HIGH);
+  pinMode(pinEncoderSwitch, INPUT);
+  digitalWrite(pinEncoderSwitch, HIGH);
 #endif
 }
 
 void loop()
 {
   signed char encoderRotation = encoderRotationNone;
-
-  byte encoderPositionCurrent = 0 /*encoderBothHigh*/;
+  byte encoderPositionCurrent = encoderBothHigh;
 
   // How a rotary encoder works:
   //
-  // Clockwise                      Counter-clockwise
+  // Counter-clockwise            Clockwise
   //          ____        ____        ____        ____
   // A ______|    |______|    |   ___|    |______|    |___
   //    0  0  1  1  0  0  1  1     0  1  1  0  0  1  1  0
@@ -98,10 +111,19 @@ void loop()
   // B ___|    |______|    |___   ______|    |______|    |
   //    0  1  1  0  0  1  1  0     0  0  1  1  0  0  1  1
   //          *           *              *           *
+  //    |  |  |  |  |  |  |  |     |  |  |  |  |  |  |  |
+  //         1111        2222           3333        2222
   //
   // Each segment 1, 2, 3, 4 is 90-degrees. All four is 360-degrees.
   //
-  // Written together, the signals from A and B look like this:
+  // The * indicates the state that the code refers to as: encoderFlagMidStep.
+  // It always corresponds to phase 3.
+  //
+  // The numbers 1111 to 4444 correspond to the if-statements in the code
+  // below. The code is looking for leading and trailing edges and mid-steps.
+  // Each if statement covers phase 3 and a portion of phase 2 and 4.
+  //
+  // The signals from A and B look like this when written together:
   //
   // A  0  0  1  1  0  0  1  1     0  1  1  0  0  1  1  0
   // B  0  1  1  0  0  1  1  0     0  0  1  1  0  0  1  1
@@ -111,18 +133,18 @@ void loop()
   // the direction is clockwise. When the values are the same, direction
   // is counter-clockwise.
   //
-  // The * indicates the state that the code refers to as: encoderFlagMidStep
-  //
   // See: https://howtomechatronics.com/tutorials/arduino/rotary-encoder-works-use-arduino/
   // See: wikipedia article PLACE THAT FIRST!
 
+  // Speed and accuracy: use a direct port read to get A & B and switch at once.
+  byte portRead = (*portInputRegister(PORT_B_ID) & portReadPinMask);
   byte encoderCurrentPosition = encoderBothHigh;
 
-  if (digitalRead(PIN_ENCODER_A) == LOW)
+  if ((portRead & portReadPinMaskA) == LOW)
   {
     encoderCurrentPosition |= encoderLowA;
   }
-  if (digitalRead(PIN_ENCODER_B) == LOW)
+  if ((portRead & portReadPinMaskB) == LOW)
   {
     encoderCurrentPosition |= encoderLowB;
   }
@@ -132,7 +154,7 @@ void loop()
   {
     if (encoderPositionPrevious == encoderBothHigh)
     {
-      // Has encoder transitioned high to low; the leading edge?
+      // Has encoder transitioned high to low (the leading edge)?
       if (encoderPositionCurrent == encoderHighBLowA)
       {
         encoderFlags |= encoderFlagHighToLowEdgeA;
@@ -149,7 +171,7 @@ void loop()
     }
     else if (encoderCurrentPosition == encoderBothHigh)
     {
-      // Has encoder transitioned low to high; the trailing edge?
+      // Has encoder transitioned low to high (the trailing edge)?
       if (encoderPositionPrevious == encoderLowB)
       {
         encoderFlags |= encoderFlagLowToHighEdgeB;
@@ -159,23 +181,24 @@ void loop()
         encoderFlags |= encoderFlagLowToHighEdgeA;
       }
 
-      // Check leading and trailing edge, or when an edge is missing, require the
-      // middle step. This will reject bounces and false movements.
+      // Check leading and trailing edge, or when an edge is missing, require 
+      // the middle step. This will reject mechanical bounces and false 
+      // movements. Each statement corresponds to the diagram above.
       if ((encoderFlags & encoderFlagHighToLowEdgeA) && (encoderFlags & (encoderFlagLowToHighEdgeB | encoderFlagMidStep)))
       {
-        encoderRotation = encoderRotationRight;
+        encoderRotation = encoderRotationRight; /* 1111 in diagram above */
       }
       else if ((encoderFlags & encoderFlagLowToHighEdgeB) && (encoderFlags & (encoderFlagHighToLowEdgeA | encoderFlagMidStep)))
       {
-        encoderRotation = encoderRotationRight;
+        encoderRotation = encoderRotationRight; /* 2222 in diagram above */
       }
       else if ((encoderFlags & encoderFlagHighToLowEdgeB) && (encoderFlags & (encoderFlagLowToHighEdgeA | encoderFlagMidStep)))
       {
-        encoderRotation = encoderRotationLeft;
+        encoderRotation = encoderRotationLeft; /* 3333 in diagram above */
       }
       else if ((encoderFlags & encoderFlagLowToHighEdgeA) && (encoderFlags & (encoderFlagHighToLowEdgeB | encoderFlagMidStep)))
       {
-        encoderRotation = encoderRotationLeft;
+        encoderRotation = encoderRotationLeft; /* 4444 in diagram above */
       }
 
       encoderFlags = encoderFlagResetForNextLoop;
@@ -185,14 +208,14 @@ void loop()
   encoderPositionPrevious = encoderCurrentPosition;
 
 #ifdef SWITCH_ENABLED
-  if (digitalRead(PIN_ENCODER_SWITCH) == SWITCH_PRESSED)
+  if ((portRead & portReadSwitchMask) == encoderSwitchPressed) 
   {
     // Send event only on transition, not while button is held down.
     if (switchIsPressed == false)
     {
-      TrinketKeyboard.pressKey(0, KEYCODE_F);
-      TrinketKeyboard.pressKey(0, 0);
-      delay(SWITCH_DEBOUNCE_DELAY);
+      TrinketKeyboard.pressKey(keycodeNoModifiers, keycodeSwitch);
+      TrinketKeyboard.pressKey(keycodeNoModifiers, keycodeRelease);
+      delay(encoderSwitchDebounceDelay);
     }
     switchIsPressed = true;
   }
@@ -200,7 +223,7 @@ void loop()
   {
     if (switchIsPressed)
     {
-      delay(SWITCH_DEBOUNCE_DELAY);
+      delay(encoderSwitchDebounceDelay);
     }
     switchIsPressed = false;
   }
@@ -209,12 +232,12 @@ void loop()
   switch (encoderRotation)
   {    
     case encoderRotationRight:
-      TrinketKeyboard.pressKey(0, KEYCODE_R);
-      TrinketKeyboard.pressKey(0, 0);
+      TrinketKeyboard.pressKey(keycodeNoModifiers, keycodeRotateRight);
+      TrinketKeyboard.pressKey(keycodeNoModifiers, keycodeRelease);
       break;
     case encoderRotationLeft:
-      TrinketKeyboard.pressKey(0, KEYCODE_L);
-      TrinketKeyboard.pressKey(0, 0);
+      TrinketKeyboard.pressKey(keycodeNoModifiers, keycodeRotateLeft);
+      TrinketKeyboard.pressKey(keycodeNoModifiers, keycodeRelease);
       break;
     default:
       TrinketKeyboard.poll();
