@@ -1,7 +1,18 @@
+// Name: Rotary-dial
+// Project: A rotary encoder used to simulate a dial for games on a M.A.M.E.
+//          arcade cabinet. Simulates a three character keyboard.
+// Author: Sheldon Maloff
+// Creation Date: 2020-April-02
+// License: Public domain.
+// 
+//
 // This code is based off the tutorial at:
 // http://learn.adafruit.com/trinket-usb-volume-knob
 // It has been modified to use named constants in place of all the cryptic,
 // hard-coded, bit positions.
+
+// IMPORTANT! The file usbconfig.h in the Trinket keyboard library has been
+// modified to uniquely identify this device!
 
 #include <Arduino.h>
 #include "TrinketKeyboard.h"
@@ -22,6 +33,15 @@ const int keycodeRotateRight = KEYCODE_R;
 const int keycodeSwitch      = KEYCODE_F;
 const int keycodeRelease     = 0;
 const int keycodeNoModifiers = 0;
+
+// Sending a full key press/release does not work with M.A.M.E. The keyboard
+// dial will only move a character or paddle a small distance. M.A.M.E. is
+// designed to keep a character moving as long as a key is pressed. This
+// constant defines how long a character will move after the code determines
+// the rotary encoder rotated. You can adjust it to adjust sensitivity.
+const int send_duration_millis = 100;
+const unsigned long keyboardTimerStopped = 0;
+static unsigned long start_millis = keyboardTimerStopped;
 
 const byte pinEncoderA = PIN2;
 const byte pinEncoderB = PIN0;
@@ -57,6 +77,12 @@ const byte encoderFlagLowToHighEdgeB   = B00100;
 static byte encoderFlags = encoderFlagResetForNextLoop;
 static byte encoderPositionPrevious = encoderBothHigh;
 
+const byte encoderButtonBeginState = 0;
+const byte encoderButtonLeftIdentificationState = 1;
+const byte encoderButtonRightIdentificationState = 2;
+const byte encoderButtonRunningState = 3;
+static byte encoderButtonState = encoderButtonBeginState;
+
 void setup()
 {
   // Set pins as input with internal pull-up resistors enabled
@@ -64,8 +90,6 @@ void setup()
   pinMode(pinEncoderB, INPUT);
   digitalWrite(pinEncoderA, HIGH);
   digitalWrite(pinEncoderB, HIGH);
-
-  TrinketKeyboard.begin(); // start the USB device engine and enumerate
 
   // get an initial reading on the encoder pins
   if (digitalRead(pinEncoderA) == LOW)
@@ -93,6 +117,11 @@ void setup()
 
 void loop()
 {
+  if (encoderButtonState != encoderButtonBeginState) {
+    // Poll on every loop, to ensure the USB remains connected.
+    TrinketKeyboard.poll();
+  }
+
   signed char encoderRotation = encoderRotationNone;
   byte encoderPositionCurrent = encoderBothHigh;
 
@@ -213,9 +242,34 @@ void loop()
     // Send event only on transition, not while button is held down.
     if (switchIsPressed == false)
     {
-      TrinketKeyboard.pressKey(keycodeNoModifiers, keycodeSwitch);
-      TrinketKeyboard.pressKey(keycodeNoModifiers, keycodeRelease);
-      delay(encoderSwitchDebounceDelay);
+      switch (encoderButtonState) {
+        case encoderButtonBeginState:
+          // Start the USB device engine and enumerate
+          TrinketKeyboard.begin();
+          encoderButtonState = encoderButtonLeftIdentificationState;
+          break;
+        case encoderButtonLeftIdentificationState:
+          // On macOS, identify the keyboard by pressing the key to the right 
+          // of the left SHIFT key
+          TrinketKeyboard.pressKey(keycodeNoModifiers, KEYCODE_Z);
+          TrinketKeyboard.pressKey(keycodeNoModifiers, keycodeRelease);
+          encoderButtonState = encoderButtonRightIdentificationState;
+          break;
+        case encoderButtonRightIdentificationState:
+          // On macOS, identify the keyboard by pressing the key to the left
+          // of the right SHIFT key
+          TrinketKeyboard.pressKey(keycodeNoModifiers, KEYCODE_SLASH);
+          TrinketKeyboard.pressKey(keycodeNoModifiers, keycodeRelease);
+          encoderButtonState = encoderButtonRunningState;
+          break;
+        case encoderButtonRunningState:
+          // We're finally running. Issue the normal keypress.
+          TrinketKeyboard.pressKey(keycodeNoModifiers, keycodeSwitch);
+          TrinketKeyboard.pressKey(keycodeNoModifiers, keycodeRelease);
+          break;
+        }
+
+        delay(encoderSwitchDebounceDelay);
     }
     switchIsPressed = true;
   }
@@ -229,18 +283,32 @@ void loop()
   }
 #endif
 
-  switch (encoderRotation)
-  {    
+  if (encoderButtonState == encoderButtonRunningState)
+  {
+    switch (encoderRotation)
+    {
     case encoderRotationRight:
-      TrinketKeyboard.pressKey(keycodeNoModifiers, keycodeRotateRight);
-      TrinketKeyboard.pressKey(keycodeNoModifiers, keycodeRelease);
+      if (start_millis == keyboardTimerStopped)
+      {
+        TrinketKeyboard.pressKey(keycodeNoModifiers, keycodeRotateRight);
+      }
+      start_millis = millis(); // start or renew the timer
       break;
     case encoderRotationLeft:
-      TrinketKeyboard.pressKey(keycodeNoModifiers, keycodeRotateLeft);
-      TrinketKeyboard.pressKey(keycodeNoModifiers, keycodeRelease);
+      if (start_millis == keyboardTimerStopped)
+      {
+        TrinketKeyboard.pressKey(keycodeNoModifiers, keycodeRotateLeft);
+      }
+      start_millis = millis(); // start or renew the timer
       break;
     default:
-      TrinketKeyboard.poll();
       break;
+    }
+  }
+
+  if (start_millis && millis() - start_millis > send_duration_millis) {
+    // Keyboard timer is running and the duration expired, release the key
+    TrinketKeyboard.pressKey(keycodeNoModifiers, keycodeRelease);
+    start_millis = keyboardTimerStopped;
   }
 }
